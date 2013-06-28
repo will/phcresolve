@@ -1,0 +1,41 @@
+#!/usr/bin/env ruby
+
+require 'net/http'
+require 'json'
+
+def get_resources
+  api_key = ENV['HEROKU_API_KEY']
+  abort('phcresolve: missing HEROKU_API_KEY environment variable') unless api_key
+
+  http = Net::HTTP.new('api.heroku.com', 443)
+  http.use_ssl = true
+  request = Net::HTTP::Get.new('/resources')
+  request.basic_auth('', api_key)
+  response = http.request(request)
+
+  raw = JSON.parse(response.body)
+
+  resources = Hash[
+    raw.map do |resource|
+      next unless resource['slug'] == 'heroku-postgresql'
+      att = resource['attachments'].first
+      identifier = "#{att['app']['name']}::#{att['config_var']}"
+      [identifier, resource['value']]
+    end
+  ]
+end
+
+case ARGV[0]
+when '--list'
+  get_resources.keys.sort.each { |name| puts name }
+when nil, '--help', '-h'
+  abort("usage: phcresolve <command|--list>")
+else
+  dbid = ENV['PHC_DATABASE']
+  abort('phcresolve: missing PHC_DATABSE environment variable') unless dbid
+  dburl = get_resources[dbid]
+  abort("phcresolve: '#{dbid}' not found\nhint: use `phcresolve --list` to see valid PHC_DATABASE options") unless dburl
+  exec({'DATABASE_URL' => dburl}, ARGV.join(' '))
+end
+
+
